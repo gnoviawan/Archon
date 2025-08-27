@@ -1,0 +1,54 @@
+# Build stage
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build arguments for service URLs
+ARG VITE_ARCHON_SERVER_URL
+ARG VITE_ARCHON_MCP_URL
+ARG VITE_ARCHON_AGENTS_URL
+ARG VITE_PROD=true
+
+# Set build-time environment variables
+ENV VITE_ARCHON_SERVER_URL=${VITE_ARCHON_SERVER_URL}
+ENV VITE_ARCHON_MCP_URL=${VITE_ARCHON_MCP_URL}
+ENV VITE_ARCHON_AGENTS_URL=${VITE_ARCHON_AGENTS_URL}
+ENV VITE_PROD=${VITE_PROD}
+
+# Build the application
+RUN npm run build
+
+# Production stage - Simple Node.js static server
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install a simple static file server
+RUN npm install -g serve
+
+# Copy built files from builder stage
+COPY --from=builder /app/dist ./dist
+
+# Create a health check file
+RUN echo '{"status":"healthy"}' > ./dist/health
+
+# Expose port 3000 (default for serve)
+EXPOSE 3000
+
+# Serve the static files
+# The serve package handles SPA routing automatically
+CMD ["serve", "-s", "dist", "-l", "3000"]
+
+# Alternative: If you prefer a more minimal approach with Python
+# FROM python:3.11-alpine
+# WORKDIR /app
+# COPY --from=builder /app/dist ./dist
+# EXPOSE 3000
+# CMD ["python", "-m", "http.server", "3000", "--directory", "dist"]

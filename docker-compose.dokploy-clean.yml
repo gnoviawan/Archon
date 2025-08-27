@@ -1,0 +1,152 @@
+version: '3.8'
+
+services:
+  # Main API Server
+  archon-server:
+    build:
+      context: ./python
+      dockerfile: Dockerfile.server
+      args:
+        ARCHON_SERVER_PORT: ${ARCHON_SERVER_PORT:-8181}
+    container_name: archon-server
+    restart: unless-stopped
+    expose:
+      - "${ARCHON_SERVER_PORT:-8181}"  # Only expose internally, not binding to host
+    environment:
+      # Database
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
+      
+      # Service Configuration
+      - SERVICE_DISCOVERY_MODE=external
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ARCHON_SERVER_PORT=${ARCHON_SERVER_PORT:-8181}
+      
+      # CORS - Allow all configured origins
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      
+      # External URLs for inter-service communication
+      - ARCHON_MCP_URL=${ARCHON_MCP_URL}
+      - ARCHON_AGENTS_URL=${ARCHON_AGENTS_URL}
+      
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./python/src:/app/src
+      - ./python/tests:/app/tests
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${ARCHON_SERVER_PORT:-8181}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - dokploy-network
+
+  # MCP Server
+  archon-mcp:
+    build:
+      context: ./python
+      dockerfile: Dockerfile.mcp
+      args:
+        ARCHON_MCP_PORT: ${ARCHON_MCP_PORT:-8051}
+    container_name: archon-mcp
+    restart: unless-stopped
+    expose:
+      - "${ARCHON_MCP_PORT:-8051}"
+    environment:
+      # Database
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      
+      # Service Configuration
+      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
+      - SERVICE_DISCOVERY_MODE=external
+      - TRANSPORT=sse
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ARCHON_MCP_PORT=${ARCHON_MCP_PORT:-8051}
+      
+      # CORS Configuration
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      
+      # External service URLs
+      - API_SERVICE_URL=${ARCHON_SERVER_URL}
+      - AGENTS_SERVICE_URL=${ARCHON_AGENTS_URL}
+      
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${ARCHON_MCP_PORT:-8051}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - dokploy-network
+  # Agents Service
+  archon-agents:
+    build:
+      context: ./python
+      dockerfile: Dockerfile.agents
+      args:
+        ARCHON_AGENTS_PORT: ${ARCHON_AGENTS_PORT:-8052}
+    container_name: archon-agents
+    restart: unless-stopped
+    expose:
+      - "${ARCHON_AGENTS_PORT:-8052}"
+    environment:
+      # Database
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
+      
+      # Service Configuration
+      - SERVICE_DISCOVERY_MODE=external
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ARCHON_AGENTS_PORT=${ARCHON_AGENTS_PORT:-8052}
+      
+      # CORS Configuration
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${ARCHON_AGENTS_PORT:-8052}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - dokploy-network
+  # Frontend - Simple Node server, no Nginx
+  archon-frontend:
+    build: 
+      context: ./archon-ui-main
+      dockerfile: Dockerfile.dokploy
+      args:
+        # Pass service URLs as build arguments
+        VITE_ARCHON_SERVER_URL: ${VITE_ARCHON_SERVER_URL}
+        VITE_ARCHON_MCP_URL: ${VITE_ARCHON_MCP_URL}
+        VITE_ARCHON_AGENTS_URL: ${VITE_ARCHON_AGENTS_URL}
+        VITE_PROD: "true"
+    container_name: archon-ui
+    restart: unless-stopped
+    expose:
+      - "3000"  # Simple Node server port
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
+# No custom networks needed - Dokploy will handle networking
